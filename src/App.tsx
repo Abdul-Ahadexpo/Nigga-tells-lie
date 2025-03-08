@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ref, onValue, set, push } from 'firebase/database';
 import { db } from './firebase';
-import { Users, DoorOpen, Play, Check } from 'lucide-react';
+import { Users, DoorOpen, Play, Check, MessageCircle, Crown } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 type Room = {
@@ -15,7 +15,10 @@ type Room = {
     from: string;
     to: string;
     completed: boolean;
+    response?: string;
+    reactions?: { [key: string]: string };
   };
+  score?: { [key: string]: number };
 };
 
 function App() {
@@ -24,6 +27,8 @@ function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [challenge, setChallenge] = useState('');
+  const [response, setResponse] = useState('');
+  const [reaction, setReaction] = useState('');
 
   useEffect(() => {
     const roomsRef = ref(db, 'rooms');
@@ -50,7 +55,7 @@ function App() {
     return () => {
       // Firebase will handle unsubscribe
     };
-  }, [currentRoom?.id]); // Changed dependency to currentRoom.id
+  }, [currentRoom?.id]);
 
   const createRoom = async () => {
     if (!roomName || !playerName) {
@@ -64,11 +69,11 @@ function App() {
       name: roomName,
       players: [playerName],
       currentTurn: playerName,
+      score: { [playerName]: 0 },
     };
 
     await set(newRoomRef, newRoom);
     setRoomName('');
-    // Set current room immediately after creation
     setCurrentRoom({ ...newRoom, id: newRoomRef.key! });
     toast.success('Room created successfully!');
   };
@@ -80,7 +85,6 @@ function App() {
     }
 
     if (room.players.includes(playerName)) {
-      // If player is already in the room, just enter it
       setCurrentRoom(room);
       return;
     }
@@ -89,6 +93,7 @@ function App() {
     const updatedRoom = {
       ...room,
       players: updatedPlayers,
+      score: { ...room.score, [playerName]: 0 },
     };
 
     await set(ref(db, `rooms/${room.id}`), updatedRoom);
@@ -115,12 +120,47 @@ function App() {
         from: playerName,
         to: nextPlayer,
         completed: false,
+        reactions: {},
       },
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
     setChallenge('');
     toast.success(`${type} challenge sent to ${nextPlayer}!`);
+  };
+
+  const submitResponse = async () => {
+    if (!currentRoom?.currentChallenge || !response) return;
+
+    const updatedRoom = {
+      ...currentRoom,
+      currentChallenge: {
+        ...currentRoom.currentChallenge,
+        response,
+      },
+    };
+
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+    setResponse('');
+    toast.success('Response submitted!');
+  };
+
+  const addReaction = async () => {
+    if (!currentRoom?.currentChallenge || !reaction) return;
+
+    const updatedRoom = {
+      ...currentRoom,
+      currentChallenge: {
+        ...currentRoom.currentChallenge,
+        reactions: {
+          ...currentRoom.currentChallenge.reactions,
+          [playerName]: reaction,
+        },
+      },
+    };
+
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+    setReaction('');
   };
 
   const markChallengeComplete = async () => {
@@ -130,6 +170,10 @@ function App() {
     const nextPlayerIndex = (currentPlayerIndex + 1) % currentRoom.players.length;
     const nextPlayer = currentRoom.players[nextPlayerIndex];
 
+    // Update scores
+    const updatedScore = { ...currentRoom.score };
+    updatedScore[currentRoom.currentChallenge.to] = (updatedScore[currentRoom.currentChallenge.to] || 0) + 1;
+
     const updatedRoom = {
       ...currentRoom,
       currentTurn: nextPlayer,
@@ -137,10 +181,11 @@ function App() {
         ...currentRoom.currentChallenge,
         completed: true,
       },
+      score: updatedScore,
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-    toast.success('Challenge marked as complete!');
+    toast.success('Challenge completed! +1 point! 🎉');
   };
 
   const leaveRoom = async () => {
@@ -149,15 +194,12 @@ function App() {
     const updatedPlayers = currentRoom.players.filter(p => p !== playerName);
     
     if (updatedPlayers.length === 0) {
-      // If last player, remove the room
       await set(ref(db, `rooms/${currentRoom.id}`), null);
     } else {
-      // Update room with remaining players
       const updatedRoom = {
         ...currentRoom,
         players: updatedPlayers,
         currentTurn: updatedPlayers[0],
-        // Reset challenge if the leaving player was involved
         currentChallenge: currentRoom.currentChallenge?.from === playerName || 
                          currentRoom.currentChallenge?.to === playerName 
                          ? undefined 
@@ -176,8 +218,11 @@ function App() {
       
       {!currentRoom ? (
         <div className="max-w-md mx-auto bg-white rounded-xl shadow-xl p-6">
-          <h1 className="text-4xl font-extrabold text-gray-800 mb-4 flex items-center justify-center text-center">~ T & D ~</h1>
-          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Play Truth and Dare with your friends</p>
+          <h1 className="text-4xl font-extrabold text-gray-800 mb-4 flex items-center justify-center text-center">
+            <Crown className="w-8 h-8 mr-2 text-yellow-500" />
+            Truth or Dare
+          </h1>
+          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your friends in this exciting game!</p>
           
           <div className="space-y-4 mt-8">
             <div>
@@ -236,7 +281,10 @@ function App() {
       ) : (
         <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-xl p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold">Room: {currentRoom.name}</h2>
+            <div>
+              <h2 className="text-2xl font-bold">Room: {currentRoom.name}</h2>
+              <p className="text-sm text-gray-500">Game in progress</p>
+            </div>
             <button
               onClick={leaveRoom}
               className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
@@ -246,7 +294,7 @@ function App() {
           </div>
 
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-2">Players:</h3>
+            <h3 className="text-lg font-semibold mb-2">Players & Scores:</h3>
             <div className="flex gap-2 flex-wrap">
               {currentRoom.players.map((player) => (
                 <span
@@ -261,6 +309,9 @@ function App() {
                 >
                   {player} {player === playerName && '(You)'} 
                   {player === currentRoom.currentTurn && '🎲'}
+                  <span className="ml-1 font-bold">
+                    {currentRoom.score?.[player] || 0}pts
+                  </span>
                 </span>
               ))}
             </div>
@@ -269,40 +320,102 @@ function App() {
           {currentRoom.currentChallenge && (
             <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
               <h3 className="text-lg font-semibold mb-2">Current Challenge:</h3>
-              <p>
-                <span className="font-medium">From:</span> {currentRoom.currentChallenge.from}
-              </p>
-              <p>
-                <span className="font-medium">To:</span> {currentRoom.currentChallenge.to}
-              </p>
-              <p>
-                <span className="font-medium">Type:</span>{' '}
-                <span className="capitalize">{currentRoom.currentChallenge.type}</span>
-              </p>
-              <p>
-                <span className="font-medium">Challenge:</span>{' '}
-                {currentRoom.currentChallenge.question}
-              </p>
-              {!currentRoom.currentChallenge.completed && currentRoom.currentChallenge.from === playerName && (
-                <button
-                  onClick={markChallengeComplete}
-                  className="mt-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
-                >
-                  <Check size={20} />
-                  Mark as Complete
-                </button>
-              )}
-              {currentRoom.currentChallenge.to === playerName && !currentRoom.currentChallenge.completed && (
-                <p className="mt-2 text-red-600 font-semibold">
-                  ⚠️ It's your turn to complete this challenge!
+              <div className="space-y-2">
+                <p>
+                  <span className="font-medium">From:</span> {currentRoom.currentChallenge.from}
                 </p>
-              )}
+                <p>
+                  <span className="font-medium">To:</span> {currentRoom.currentChallenge.to}
+                </p>
+                <p>
+                  <span className="font-medium">Type:</span>{' '}
+                  <span className={`capitalize font-bold ${
+                    currentRoom.currentChallenge.type === 'truth' ? 'text-blue-600' : 'text-red-600'
+                  }`}>
+                    {currentRoom.currentChallenge.type}
+                  </span>
+                </p>
+                <p>
+                  <span className="font-medium">Challenge:</span>{' '}
+                  <span className="text-lg">{currentRoom.currentChallenge.question}</span>
+                </p>
+
+                {currentRoom.currentChallenge.to === playerName && !currentRoom.currentChallenge.completed && (
+                  <div className="mt-4 p-4 bg-white rounded-lg border border-yellow-200">
+                    <p className="text-red-600 font-semibold mb-2">
+                      ⚠️ It's your turn to respond to this challenge!
+                    </p>
+                    <textarea
+                      value={response}
+                      onChange={(e) => setResponse(e.target.value)}
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring focus:ring-purple-200"
+                      placeholder="Type your response..."
+                      rows={2}
+                    />
+                    <button
+                      onClick={submitResponse}
+                      className="mt-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 flex items-center gap-2"
+                    >
+                      <MessageCircle size={20} />
+                      Submit Response
+                    </button>
+                  </div>
+                )}
+
+                {currentRoom.currentChallenge.response && (
+                  <div className="mt-4 p-4 bg-white rounded-lg border border-green-200">
+                    <p className="font-medium">Response:</p>
+                    <p className="text-lg">{currentRoom.currentChallenge.response}</p>
+                    
+                    {!currentRoom.currentChallenge.reactions?.[playerName] && (
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="text"
+                          value={reaction}
+                          onChange={(e) => setReaction(e.target.value)}
+                          className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring focus:ring-purple-200"
+                          placeholder="Add a reaction..."
+                        />
+                        <button
+                          onClick={addReaction}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                        >
+                          React
+                        </button>
+                      </div>
+                    )}
+
+                    {currentRoom.currentChallenge.reactions && Object.keys(currentRoom.currentChallenge.reactions).length > 0 && (
+                      <div className="mt-2">
+                        <p className="font-medium">Reactions:</p>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {Object.entries(currentRoom.currentChallenge.reactions).map(([player, reaction]) => (
+                            <span key={player} className="px-2 py-1 bg-gray-100 rounded-full text-sm">
+                              {player}: {reaction}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!currentRoom.currentChallenge.completed && currentRoom.currentChallenge.from === playerName && currentRoom.currentChallenge.response && (
+                  <button
+                    onClick={markChallengeComplete}
+                    className="mt-4 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2 w-full justify-center"
+                  >
+                    <Check size={20} />
+                    Accept Response & Complete Challenge
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
           {currentRoom.currentTurn === playerName && (!currentRoom.currentChallenge || currentRoom.currentChallenge.completed) && (
             <div className="space-y-4">
-              <p className="text-green-600 font-semibold">🎲 It's your turn to give a challenge!</p>
+              <p className="text-green-600 font-semibold text-lg">🎲 It's your turn to give a challenge!</p>
               <textarea
                 value={challenge}
                 onChange={(e) => setChallenge(e.target.value)}
