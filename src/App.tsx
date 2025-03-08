@@ -38,7 +38,9 @@ function App() {
         
         if (currentRoom) {
           const updatedRoom = roomsList.find(r => r.id === currentRoom.id);
-          setCurrentRoom(updatedRoom || null);
+          if (updatedRoom) {
+            setCurrentRoom(updatedRoom);
+          }
         }
       } else {
         setRooms([]);
@@ -48,7 +50,7 @@ function App() {
     return () => {
       // Firebase will handle unsubscribe
     };
-  }, [currentRoom]);
+  }, [currentRoom?.id]); // Changed dependency to currentRoom.id
 
   const createRoom = async () => {
     if (!roomName || !playerName) {
@@ -66,6 +68,8 @@ function App() {
 
     await set(newRoomRef, newRoom);
     setRoomName('');
+    // Set current room immediately after creation
+    setCurrentRoom({ ...newRoom, id: newRoomRef.key! });
     toast.success('Room created successfully!');
   };
 
@@ -76,16 +80,19 @@ function App() {
     }
 
     if (room.players.includes(playerName)) {
-      toast.error('You are already in this room');
+      // If player is already in the room, just enter it
+      setCurrentRoom(room);
       return;
     }
 
     const updatedPlayers = [...room.players, playerName];
-    await set(ref(db, `rooms/${room.id}`), {
+    const updatedRoom = {
       ...room,
       players: updatedPlayers,
-    });
-    setCurrentRoom(room);
+    };
+
+    await set(ref(db, `rooms/${room.id}`), updatedRoom);
+    setCurrentRoom(updatedRoom);
     toast.success('Joined room successfully!');
   };
 
@@ -99,7 +106,7 @@ function App() {
     const nextPlayerIndex = (currentPlayerIndex + 1) % currentRoom.players.length;
     const nextPlayer = currentRoom.players[nextPlayerIndex];
 
-    await set(ref(db, `rooms/${currentRoom.id}`), {
+    const updatedRoom = {
       ...currentRoom,
       currentTurn: nextPlayer,
       currentChallenge: {
@@ -109,20 +116,58 @@ function App() {
         to: nextPlayer,
         completed: false,
       },
-    });
+    };
+
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
     setChallenge('');
+    toast.success(`${type} challenge sent to ${nextPlayer}!`);
   };
 
   const markChallengeComplete = async () => {
     if (!currentRoom?.currentChallenge) return;
 
-    await set(ref(db, `rooms/${currentRoom.id}`), {
+    const currentPlayerIndex = currentRoom.players.indexOf(currentRoom.currentChallenge.to);
+    const nextPlayerIndex = (currentPlayerIndex + 1) % currentRoom.players.length;
+    const nextPlayer = currentRoom.players[nextPlayerIndex];
+
+    const updatedRoom = {
       ...currentRoom,
+      currentTurn: nextPlayer,
       currentChallenge: {
         ...currentRoom.currentChallenge,
         completed: true,
       },
-    });
+    };
+
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+    toast.success('Challenge marked as complete!');
+  };
+
+  const leaveRoom = async () => {
+    if (!currentRoom) return;
+
+    const updatedPlayers = currentRoom.players.filter(p => p !== playerName);
+    
+    if (updatedPlayers.length === 0) {
+      // If last player, remove the room
+      await set(ref(db, `rooms/${currentRoom.id}`), null);
+    } else {
+      // Update room with remaining players
+      const updatedRoom = {
+        ...currentRoom,
+        players: updatedPlayers,
+        currentTurn: updatedPlayers[0],
+        // Reset challenge if the leaving player was involved
+        currentChallenge: currentRoom.currentChallenge?.from === playerName || 
+                         currentRoom.currentChallenge?.to === playerName 
+                         ? undefined 
+                         : currentRoom.currentChallenge,
+      };
+      await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+    }
+    
+    setCurrentRoom(null);
+    toast.success('Left room successfully');
   };
 
   return (
@@ -131,10 +176,10 @@ function App() {
       
       {!currentRoom ? (
         <div className="max-w-md mx-auto bg-white rounded-xl shadow-xl p-6">
-<h1 className="text-4xl font-extrabold text-gray-800 mb-4 flex items-center justify-center text-center">~ T & D ~</h1>
-<p className="text-lg text-gray-600 flex items-center justify-center text-center">Play Truth and Dare with your nigga~</p>
+          <h1 className="text-4xl font-extrabold text-gray-800 mb-4 flex items-center justify-center text-center">~ T & D ~</h1>
+          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Play Truth and Dare with your friends</p>
           
-          <div className="space-y-4">
+          <div className="space-y-4 mt-8">
             <div>
               <label className="block text-sm font-medium text-gray-700">Your Name</label>
               <input
@@ -193,7 +238,7 @@ function App() {
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold">Room: {currentRoom.name}</h2>
             <button
-              onClick={() => setCurrentRoom(null)}
+              onClick={leaveRoom}
               className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
             >
               Leave Room
@@ -208,11 +253,14 @@ function App() {
                   key={player}
                   className={`px-3 py-1 rounded-full ${
                     player === currentRoom.currentTurn
-                      ? 'bg-green-100 text-green-800'
+                      ? 'bg-green-100 text-green-800 font-bold'
+                      : player === playerName
+                      ? 'bg-blue-100 text-blue-800'
                       : 'bg-gray-100 text-gray-800'
                   }`}
                 >
-                  {player}
+                  {player} {player === playerName && '(You)'} 
+                  {player === currentRoom.currentTurn && '🎲'}
                 </span>
               ))}
             </div>
@@ -235,7 +283,7 @@ function App() {
                 <span className="font-medium">Challenge:</span>{' '}
                 {currentRoom.currentChallenge.question}
               </p>
-              {currentRoom.currentChallenge.from === playerName && !currentRoom.currentChallenge.completed && (
+              {!currentRoom.currentChallenge.completed && currentRoom.currentChallenge.from === playerName && (
                 <button
                   onClick={markChallengeComplete}
                   className="mt-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
@@ -244,11 +292,17 @@ function App() {
                   Mark as Complete
                 </button>
               )}
+              {currentRoom.currentChallenge.to === playerName && !currentRoom.currentChallenge.completed && (
+                <p className="mt-2 text-red-600 font-semibold">
+                  ⚠️ It's your turn to complete this challenge!
+                </p>
+              )}
             </div>
           )}
 
-          {currentRoom.currentTurn === playerName && !currentRoom.currentChallenge?.completed && (
+          {currentRoom.currentTurn === playerName && (!currentRoom.currentChallenge || currentRoom.currentChallenge.completed) && (
             <div className="space-y-4">
+              <p className="text-green-600 font-semibold">🎲 It's your turn to give a challenge!</p>
               <textarea
                 value={challenge}
                 onChange={(e) => setChallenge(e.target.value)}
