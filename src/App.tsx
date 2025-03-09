@@ -249,7 +249,7 @@ function App() {
             <Crown className="w-8 h-8 mr-2 text-yellow-500" />
             Truth or Dare
           </h1>
-          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your friends in this exciting game!</p>
+          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
           
           <div className="space-y-4 mt-6 md:mt-8">
             <div>
