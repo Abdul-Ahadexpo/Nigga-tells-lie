@@ -197,22 +197,24 @@ function App() {
       // Delete the room if no players left
       await set(ref(db, `rooms/${currentRoom.id}`), null);
     } else {
-      // Update room with remaining players
-      const updatedRoom = {
-        ...currentRoom,
+      // Create a new room object without undefined values
+      const newRoom = {
+        name: currentRoom.name,
         players: updatedPlayers,
         currentTurn: updatedPlayers[0],
-        // Remove current challenge if it involves the leaving player
-        currentChallenge: currentRoom.currentChallenge?.from === playerName || 
-                         currentRoom.currentChallenge?.to === playerName 
-                         ? undefined 
-                         : currentRoom.currentChallenge,
-        // Remove player's score
         score: Object.entries(currentRoom.score || {})
           .filter(([player]) => player !== playerName)
           .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
       };
-      await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+
+      // Only add currentChallenge if it doesn't involve the leaving player
+      if (currentRoom.currentChallenge &&
+          currentRoom.currentChallenge.from !== playerName &&
+          currentRoom.currentChallenge.to !== playerName) {
+        newRoom.currentChallenge = currentRoom.currentChallenge;
+      }
+
+      await set(ref(db, `rooms/${currentRoom.id}`), newRoom);
     }
     
     setCurrentRoom(null);
@@ -229,7 +231,7 @@ function App() {
             <Crown className="w-8 h-8 mr-2 text-yellow-500" />
             Truth or Dare
           </h1>
-        <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
+           <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
           
           <div className="space-y-4 mt-6 md:mt-8">
             <div>
