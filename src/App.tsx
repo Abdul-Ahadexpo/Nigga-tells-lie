@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ref, onValue, set, push } from 'firebase/database';
 import { db } from './firebase';
-import { Users, DoorOpen, Play, Check, MessageCircle, Crown } from 'lucide-react';
+import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 type Room = {
@@ -22,13 +22,14 @@ type Room = {
 };
 
 function App() {
-  const [playerName, setPlayerName] = useState('');
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') || '');
   const [roomName, setRoomName] = useState('');
   const [rooms, setRooms] = useState<Room[]>([]);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [challenge, setChallenge] = useState('');
   const [response, setResponse] = useState('');
   const [reaction, setReaction] = useState('');
+  const [selectedPlayer, setSelectedPlayer] = useState<string>('');
 
   useEffect(() => {
     const roomsRef = ref(db, 'rooms');
@@ -56,6 +57,12 @@ function App() {
       // Firebase will handle unsubscribe
     };
   }, [currentRoom?.id]);
+
+  useEffect(() => {
+    if (playerName) {
+      localStorage.setItem('playerName', playerName);
+    }
+  }, [playerName]);
 
   const createRoom = async () => {
     if (!roomName || !playerName) {
@@ -102,23 +109,19 @@ function App() {
   };
 
   const sendChallenge = async (type: 'truth' | 'dare') => {
-    if (!currentRoom || !challenge) {
-      toast.error('Please enter a challenge');
+    if (!currentRoom || !challenge || !selectedPlayer) {
+      toast.error('Please enter a challenge and select a player');
       return;
     }
 
-    const currentPlayerIndex = currentRoom.players.indexOf(playerName);
-    const nextPlayerIndex = (currentPlayerIndex + 1) % currentRoom.players.length;
-    const nextPlayer = currentRoom.players[nextPlayerIndex];
-
     const updatedRoom = {
       ...currentRoom,
-      currentTurn: nextPlayer,
+      currentTurn: selectedPlayer,
       currentChallenge: {
         type,
         question: challenge,
         from: playerName,
-        to: nextPlayer,
+        to: selectedPlayer,
         completed: false,
         reactions: {},
       },
@@ -126,7 +129,8 @@ function App() {
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
     setChallenge('');
-    toast.success(`${type} challenge sent to ${nextPlayer}!`);
+    setSelectedPlayer('');
+    toast.success(`${type} challenge sent to ${selectedPlayer}!`);
   };
 
   const submitResponse = async () => {
@@ -166,17 +170,13 @@ function App() {
   const markChallengeComplete = async () => {
     if (!currentRoom?.currentChallenge) return;
 
-    const currentPlayerIndex = currentRoom.players.indexOf(currentRoom.currentChallenge.to);
-    const nextPlayerIndex = (currentPlayerIndex + 1) % currentRoom.players.length;
-    const nextPlayer = currentRoom.players[nextPlayerIndex];
-
     // Update scores
     const updatedScore = { ...currentRoom.score };
     updatedScore[currentRoom.currentChallenge.to] = (updatedScore[currentRoom.currentChallenge.to] || 0) + 1;
 
     const updatedRoom = {
       ...currentRoom,
-      currentTurn: nextPlayer,
+      currentTurn: currentRoom.currentChallenge.to,
       currentChallenge: {
         ...currentRoom.currentChallenge,
         completed: true,
@@ -194,16 +194,23 @@ function App() {
     const updatedPlayers = currentRoom.players.filter(p => p !== playerName);
     
     if (updatedPlayers.length === 0) {
+      // Delete the room if no players left
       await set(ref(db, `rooms/${currentRoom.id}`), null);
     } else {
+      // Update room with remaining players
       const updatedRoom = {
         ...currentRoom,
         players: updatedPlayers,
         currentTurn: updatedPlayers[0],
+        // Remove current challenge if it involves the leaving player
         currentChallenge: currentRoom.currentChallenge?.from === playerName || 
                          currentRoom.currentChallenge?.to === playerName 
                          ? undefined 
                          : currentRoom.currentChallenge,
+        // Remove player's score
+        score: Object.entries(currentRoom.score || {})
+          .filter(([player]) => player !== playerName)
+          .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
       };
       await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
     }
@@ -213,18 +220,18 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4 md:p-8">
       <Toaster position="top-right" />
       
       {!currentRoom ? (
-        <div className="max-w-md mx-auto bg-white rounded-xl shadow-xl p-6">
-          <h1 className="text-4xl font-extrabold text-gray-800 mb-4 flex items-center justify-center text-center">
+        <div className="max-w-md mx-auto bg-white rounded-xl shadow-xl p-4 md:p-6">
+          <h1 className="text-3xl md:text-4xl font-extrabold text-gray-800 mb-4 flex items-center justify-center text-center">
             <Crown className="w-8 h-8 mr-2 text-yellow-500" />
             Truth or Dare
           </h1>
-          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
+        <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
           
-          <div className="space-y-4 mt-8">
+          <div className="space-y-4 mt-6 md:mt-8">
             <div>
               <label className="block text-sm font-medium text-gray-700">Your Name</label>
               <input
@@ -279,15 +286,15 @@ function App() {
           </div>
         </div>
       ) : (
-        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-xl p-6">
-          <div className="flex justify-between items-center mb-6">
+        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-xl p-4 md:p-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 md:gap-0">
             <div>
               <h2 className="text-2xl font-bold">Room: {currentRoom.name}</h2>
               <p className="text-sm text-gray-500">Game in progress</p>
             </div>
             <button
               onClick={leaveRoom}
-              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+              className="w-full md:w-auto px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
             >
               Leave Room
             </button>
@@ -354,7 +361,7 @@ function App() {
                     />
                     <button
                       onClick={submitResponse}
-                      className="mt-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 flex items-center gap-2"
+                      className="mt-2 w-full md:w-auto px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 flex items-center gap-2 justify-center"
                     >
                       <MessageCircle size={20} />
                       Submit Response
@@ -368,7 +375,7 @@ function App() {
                     <p className="text-lg">{currentRoom.currentChallenge.response}</p>
                     
                     {!currentRoom.currentChallenge.reactions?.[playerName] && (
-                      <div className="mt-2 flex gap-2">
+                      <div className="mt-2 flex flex-col md:flex-row gap-2">
                         <input
                           type="text"
                           value={reaction}
@@ -416,6 +423,24 @@ function App() {
           {currentRoom.currentTurn === playerName && (!currentRoom.currentChallenge || currentRoom.currentChallenge.completed) && (
             <div className="space-y-4">
               <p className="text-green-600 font-semibold text-lg">🎲 It's your turn to give a challenge!</p>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Player to Challenge:</label>
+                <select
+                  value={selectedPlayer}
+                  onChange={(e) => setSelectedPlayer(e.target.value)}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring focus:ring-purple-200"
+                >
+                  <option value="">Choose a player...</option>
+                  {currentRoom.players
+                    .filter(player => player !== playerName)
+                    .map(player => (
+                      <option key={player} value={player}>{player}</option>
+                    ))
+                  }
+                </select>
+              </div>
+              
               <textarea
                 value={challenge}
                 onChange={(e) => setChallenge(e.target.value)}
@@ -423,7 +448,7 @@ function App() {
                 placeholder="Enter your truth question or dare challenge..."
                 rows={3}
               />
-              <div className="flex gap-2">
+              <div className="flex flex-col md:flex-row gap-2">
                 <button
                   onClick={() => sendChallenge('truth')}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center justify-center gap-2"
