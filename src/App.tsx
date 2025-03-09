@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ref, onValue, set, push } from 'firebase/database';
 import { db } from './firebase';
-import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck } from 'lucide-react';
+import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck, X } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 type Room = {
@@ -167,12 +167,26 @@ function App() {
     setReaction('');
   };
 
-  const markChallengeComplete = async () => {
+  const markChallengeComplete = async (completed: boolean) => {
     if (!currentRoom?.currentChallenge) return;
 
-    // Update scores
+    // Update scores only if the challenge was completed
     const updatedScore = { ...currentRoom.score };
-    updatedScore[currentRoom.currentChallenge.to] = (updatedScore[currentRoom.currentChallenge.to] || 0) + 1;
+    if (completed) {
+      updatedScore[currentRoom.currentChallenge.to] = (updatedScore[currentRoom.currentChallenge.to] || 0) + 1;
+      
+      // Check if someone won (reached 15 points)
+      const winner = Object.entries(updatedScore).find(([_, score]) => score >= 15);
+      if (winner) {
+        toast.success(`🎉 ${winner[0]} wins the game with ${winner[1]} points! 👑`, {
+          duration: 5000
+        });
+        // Reset all scores to 0
+        Object.keys(updatedScore).forEach(player => {
+          updatedScore[player] = 0;
+        });
+      }
+    }
 
     const updatedRoom = {
       ...currentRoom,
@@ -185,7 +199,11 @@ function App() {
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-    toast.success('Challenge completed! +1 point! 🎉');
+    if (completed) {
+      toast.success('Challenge completed! +1 point! 🎉');
+    } else {
+      toast.error('Challenge marked as not completed');
+    }
   };
 
   const leaveRoom = async () => {
@@ -231,7 +249,7 @@ function App() {
             <Crown className="w-8 h-8 mr-2 text-yellow-500" />
             Truth or Dare
           </h1>
-           <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
+          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your friends in this exciting game!</p>
           
           <div className="space-y-4 mt-6 md:mt-8">
             <div>
@@ -292,7 +310,7 @@ function App() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 md:gap-0">
             <div>
               <h2 className="text-2xl font-bold">Room: {currentRoom.name}</h2>
-              <p className="text-sm text-gray-500">Game in progress</p>
+              <p className="text-sm text-gray-500">Game in progress • First to 15 points wins!</p>
             </div>
             <button
               onClick={leaveRoom}
@@ -410,13 +428,22 @@ function App() {
                 )}
 
                 {!currentRoom.currentChallenge.completed && currentRoom.currentChallenge.from === playerName && currentRoom.currentChallenge.response && (
-                  <button
-                    onClick={markChallengeComplete}
-                    className="mt-4 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2 w-full justify-center"
-                  >
-                    <Check size={20} />
-                    Accept Response & Complete Challenge
-                  </button>
+                  <div className="mt-4 flex flex-col md:flex-row gap-2">
+                    <button
+                      onClick={() => markChallengeComplete(true)}
+                      className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2 justify-center"
+                    >
+                      <Check size={20} />
+                      Accept Response & Complete Challenge
+                    </button>
+                    <button
+                      onClick={() => markChallengeComplete(false)}
+                      className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-2 justify-center"
+                    >
+                      <X size={20} />
+                      Challenge Not Completed
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
