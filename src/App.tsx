@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ref, onValue, set, push } from 'firebase/database';
 import { db } from './firebase';
-import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck, X } from 'lucide-react';
+import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck, X, Send } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 type Room = {
@@ -19,6 +19,13 @@ type Room = {
     reactions?: { [key: string]: string };
   };
   score?: { [key: string]: number };
+  chat?: {
+    [key: string]: {
+      sender: string;
+      message: string;
+      timestamp: number;
+    };
+  };
 };
 
 function App() {
@@ -30,6 +37,8 @@ function App() {
   const [response, setResponse] = useState('');
   const [reaction, setReaction] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
+  const [chatMessage, setChatMessage] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const roomsRef = ref(db, 'rooms');
@@ -64,6 +73,10 @@ function App() {
     }
   }, [playerName]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentRoom?.chat]);
+
   const createRoom = async () => {
     if (!roomName || !playerName) {
       toast.error('Please enter both room name and your name');
@@ -77,6 +90,7 @@ function App() {
       players: [playerName],
       currentTurn: playerName,
       score: { [playerName]: 0 },
+      chat: {},
     };
 
     await set(newRoomRef, newRoom);
@@ -206,6 +220,25 @@ function App() {
     }
   };
 
+  const sendChatMessage = async () => {
+    if (!currentRoom || !chatMessage.trim()) return;
+
+    const updatedRoom = {
+      ...currentRoom,
+      chat: {
+        ...(currentRoom.chat || {}),
+        [Date.now()]: {
+          sender: playerName,
+          message: chatMessage.trim(),
+          timestamp: Date.now(),
+        },
+      },
+    };
+
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+    setChatMessage('');
+  };
+
   const leaveRoom = async () => {
     if (!currentRoom) return;
 
@@ -223,6 +256,7 @@ function App() {
         score: Object.entries(currentRoom.score || {})
           .filter(([player]) => player !== playerName)
           .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
+        chat: currentRoom.chat,
       };
 
       // Only add currentChallenge if it doesn't involve the leaving player
@@ -249,7 +283,7 @@ function App() {
             <Crown className="w-8 h-8 mr-2 text-yellow-500" />
             Truth or Dare
           </h1>
-          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
+         <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
           
           <div className="space-y-4 mt-6 md:mt-8">
             <div>
@@ -341,6 +375,46 @@ function App() {
                   </span>
                 </span>
               ))}
+            </div>
+          </div>
+
+          {/* Chat Section */}
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="text-lg font-semibold mb-2">Chat</h3>
+            <div className="h-40 overflow-y-auto mb-4 space-y-2">
+              {currentRoom.chat && Object.entries(currentRoom.chat)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([timestamp, msg]) => (
+                  <div
+                    key={timestamp}
+                    className={`p-2 rounded-lg max-w-[80%] ${
+                      msg.sender === playerName
+                        ? 'ml-auto bg-blue-100 text-blue-900'
+                        : 'bg-gray-100 text-gray-900'
+                    }`}
+                  >
+                    <p className="text-xs font-medium">{msg.sender}</p>
+                    <p>{msg.message}</p>
+                  </div>
+                ))}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+                className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring focus:ring-purple-200"
+                placeholder="Type a message..."
+              />
+              <button
+                onClick={sendChatMessage}
+                className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 flex items-center gap-2"
+              >
+                <Send size={20} />
+                Send
+              </button>
             </div>
           </div>
 
