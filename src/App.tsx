@@ -326,28 +326,26 @@ function App() {
     }
   };
 
+
+  
   const sendChatMessage = async () => {
-    if (!currentRoom || !chatMessage.trim()) return;
+  if (!currentRoom || !chatMessage.trim()) return;
 
-    const updatedRoom = {
-      ...currentRoom,
-      chat: {
-        ...(currentRoom.chat || {}),
-        [Date.now()]: {
-          sender: playerName,
-          message: chatMessage.trim(),
-          timestamp: Date.now(),
-        },
-      },
-      typing: {
-        ...(currentRoom.typing || {}),
-        [playerName]: 0,
-      },
-    };
+  const chatRef = ref(db, `rooms/${currentRoom.id}/chat`);
+  
+  // Push new message instead of replacing chat object
+  await push(chatRef, {
+    sender: playerName,
+    message: chatMessage.trim(),
+    timestamp: Date.now(),
+  });
 
-    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-    setChatMessage('');
-  };
+  setChatMessage('');
+};
+
+
+
+  
 
   const leaveRoom = async () => {
     if (!currentRoom) return;
