@@ -26,7 +26,6 @@ type Room = {
       timestamp: number;
     };
   };
-  typing?: { [key: string]: number };
 };
 
 function App() {
@@ -40,7 +39,6 @@ function App() {
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
   const [chatMessage, setChatMessage] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
     const roomsRef = ref(db, 'rooms');
@@ -65,9 +63,7 @@ function App() {
     });
 
     return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
+      // Firebase will handle unsubscribe
     };
   }, [currentRoom?.id]);
 
@@ -80,46 +76,6 @@ function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentRoom?.chat]);
-
-  const updateTypingStatus = async (isTyping: boolean) => {
-    if (!currentRoom || !playerName) return;
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    const timestamp = isTyping ? Date.now() : 0;
-    await set(ref(db, `rooms/${currentRoom.id}/typing/${playerName}`), timestamp);
-
-    if (isTyping) {
-      typingTimeoutRef.current = setTimeout(async () => {
-        await set(ref(db, `rooms/${currentRoom.id}/typing/${playerName}`), 0);
-      }, 3000);
-    }
-  };
-
-  const getTypingUsers = () => {
-    if (!currentRoom?.typing) return [];
-    const now = Date.now();
-    return Object.entries(currentRoom.typing)
-      .filter(([user, timestamp]) => 
-        user !== playerName && 
-        timestamp > 0 && 
-        now - timestamp < 3000
-      )
-      .map(([user]) => user);
-  };
-
-  const renderTypingIndicator = () => {
-    const typingUsers = getTypingUsers();
-    if (typingUsers.length === 0) return null;
-
-    return (
-      <div className="text-sm text-gray-500 italic">
-        {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-      </div>
-    );
-  };
 
   const createRoom = async () => {
     if (!roomName || !playerName) {
@@ -228,15 +184,18 @@ function App() {
   const markChallengeComplete = async (completed: boolean) => {
     if (!currentRoom?.currentChallenge) return;
 
+    // Update scores only if the challenge was completed
     const updatedScore = { ...currentRoom.score };
     if (completed) {
       updatedScore[currentRoom.currentChallenge.to] = (updatedScore[currentRoom.currentChallenge.to] || 0) + 1;
       
+      // Check if someone won (reached 15 points)
       const winner = Object.entries(updatedScore).find(([_, score]) => score >= 15);
       if (winner) {
         toast.success(`🎉 ${winner[0]} wins the game with ${winner[1]} points! 👑`, {
           duration: 5000
         });
+        // Reset all scores to 0
         Object.keys(updatedScore).forEach(player => {
           updatedScore[player] = 0;
         });
@@ -277,7 +236,6 @@ function App() {
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-    await updateTypingStatus(false);
     setChatMessage('');
   };
 
@@ -287,8 +245,10 @@ function App() {
     const updatedPlayers = currentRoom.players.filter(p => p !== playerName);
     
     if (updatedPlayers.length === 0) {
+      // Delete the room if no players left
       await set(ref(db, `rooms/${currentRoom.id}`), null);
     } else {
+      // Create a new room object without undefined values
       const newRoom = {
         name: currentRoom.name,
         players: updatedPlayers,
@@ -299,6 +259,7 @@ function App() {
         chat: currentRoom.chat,
       };
 
+      // Only add currentChallenge if it doesn't involve the leaving player
       if (currentRoom.currentChallenge &&
           currentRoom.currentChallenge.from !== playerName &&
           currentRoom.currentChallenge.to !== playerName) {
@@ -436,17 +397,13 @@ function App() {
                     <p>{msg.message}</p>
                   </div>
                 ))}
-              {renderTypingIndicator()}
               <div ref={chatEndRef} />
             </div>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={chatMessage}
-                onChange={(e) => {
-                  setChatMessage(e.target.value);
-                  updateTypingStatus(true);
-                }}
+                onChange={(e) => setChatMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
                 className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring focus:ring-purple-200"
                 placeholder="Type a message..."
@@ -618,6 +575,6 @@ function App() {
   );
 }
 
-export default App;
 
-export default App
+
+export default App;
