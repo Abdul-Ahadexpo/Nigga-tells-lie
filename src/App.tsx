@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ref, onValue, set, push, remove } from 'firebase/database';
+import { ref, onValue, set, push } from 'firebase/database';
 import { db } from './firebase';
-import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck, X, Send, UserMinus } from 'lucide-react';
+import { Users, DoorOpen, Play, Check, MessageCircle, Crown, UserCheck, X, Send } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
 type Room = {
@@ -26,15 +26,6 @@ type Room = {
       timestamp: number;
     };
   };
-  typing?: {
-    [key: string]: number;
-  };
-  voteKick?: {
-    target: string;
-    votes: string[];
-    initiator: string;
-    timestamp: number;
-  };
 };
 
 function App() {
@@ -48,7 +39,6 @@ function App() {
   const [selectedPlayer, setSelectedPlayer] = useState<string>('');
   const [chatMessage, setChatMessage] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
     const roomsRef = ref(db, 'rooms');
@@ -87,96 +77,6 @@ function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentRoom?.chat]);
 
-  const updateTypingStatus = async (isTyping: boolean) => {
-    if (!currentRoom) return;
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    const updatedRoom = {
-      ...currentRoom,
-      typing: {
-        ...(currentRoom.typing || {}),
-        [playerName]: isTyping ? Date.now() : 0,
-      },
-    };
-
-    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-
-    if (isTyping) {
-      typingTimeoutRef.current = setTimeout(() => {
-        updateTypingStatus(false);
-      }, 2000);
-    }
-  };
-
-  const initiateVoteKick = async (targetPlayer: string) => {
-    if (!currentRoom || targetPlayer === playerName) return;
-
-    const updatedRoom = {
-      ...currentRoom,
-      voteKick: {
-        target: targetPlayer,
-        votes: [playerName],
-        initiator: playerName,
-        timestamp: Date.now(),
-      },
-    };
-
-    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-    toast.success(`Vote to remove ${targetPlayer} has started`);
-  };
-
-  const voteToKick = async (vote: boolean) => {
-    if (!currentRoom?.voteKick) return;
-
-    const { target, votes } = currentRoom.voteKick;
-    
-    if (vote && !votes.includes(playerName)) {
-      const updatedVotes = [...votes, playerName];
-      const requiredVotes = Math.ceil(currentRoom.players.length * 0.7); // 70% of players required
-
-      if (updatedVotes.length >= requiredVotes) {
-        // Remove the player
-        const updatedPlayers = currentRoom.players.filter(p => p !== target);
-        const updatedRoom = {
-          ...currentRoom,
-          players: updatedPlayers,
-          currentTurn: currentRoom.currentTurn === target ? updatedPlayers[0] : currentRoom.currentTurn,
-          voteKick: undefined,
-          score: Object.entries(currentRoom.score || {})
-            .filter(([player]) => player !== target)
-            .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
-          chat: currentRoom.chat || {}, // Preserve chat
-        };
-
-        await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-        toast.success(`${target} has been removed from the room`);
-      } else {
-        // Update votes
-        const updatedRoom = {
-          ...currentRoom,
-          voteKick: {
-            ...currentRoom.voteKick,
-            votes: updatedVotes,
-          },
-          chat: currentRoom.chat || {}, // Preserve chat
-        };
-        await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-      }
-    } else if (!vote) {
-      // Cancel vote
-      const updatedRoom = {
-        ...currentRoom,
-        voteKick: undefined,
-        chat: currentRoom.chat || {}, // Preserve chat
-      };
-      await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
-      toast.error('Vote to remove player was cancelled');
-    }
-  };
-
   const createRoom = async () => {
     if (!roomName || !playerName) {
       toast.error('Please enter both room name and your name');
@@ -191,7 +91,6 @@ function App() {
       currentTurn: playerName,
       score: { [playerName]: 0 },
       chat: {},
-      typing: {},
     };
 
     await set(newRoomRef, newRoom);
@@ -216,7 +115,6 @@ function App() {
       ...room,
       players: updatedPlayers,
       score: { ...room.score, [playerName]: 0 },
-      chat: room.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${room.id}`), updatedRoom);
@@ -241,7 +139,6 @@ function App() {
         completed: false,
         reactions: {},
       },
-      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -259,7 +156,6 @@ function App() {
         ...currentRoom.currentChallenge,
         response,
       },
-      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -279,7 +175,6 @@ function App() {
           [playerName]: reaction,
         },
       },
-      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -315,7 +210,6 @@ function App() {
         completed: true,
       },
       score: updatedScore,
-      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -326,26 +220,24 @@ function App() {
     }
   };
 
-
-  
   const sendChatMessage = async () => {
-  if (!currentRoom || !chatMessage.trim()) return;
+    if (!currentRoom || !chatMessage.trim()) return;
 
-  const chatRef = ref(db, `rooms/${currentRoom.id}/chat`);
-  
-  // Push new message instead of replacing chat object
-  await push(chatRef, {
-    sender: playerName,
-    message: chatMessage.trim(),
-    timestamp: Date.now(),
-  });
+    const updatedRoom = {
+      ...currentRoom,
+      chat: {
+        ...(currentRoom.chat || {}),
+        [Date.now()]: {
+          sender: playerName,
+          message: chatMessage.trim(),
+          timestamp: Date.now(),
+        },
+      },
+    };
 
-  setChatMessage('');
-};
-
-
-
-  
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
+    setChatMessage('');
+  };
 
   const leaveRoom = async () => {
     if (!currentRoom) return;
@@ -364,8 +256,7 @@ function App() {
         score: Object.entries(currentRoom.score || {})
           .filter(([player]) => player !== playerName)
           .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
-        chat: currentRoom.chat || {}, // Preserve chat
-        typing: currentRoom.typing || {},
+        chat: currentRoom.chat,
       };
 
       // Only add currentChallenge if it doesn't involve the leaving player
@@ -381,17 +272,6 @@ function App() {
     setCurrentRoom(null);
     toast.success('Left room successfully');
   };
-
-  // Get typing players
-  const typingPlayers = currentRoom?.typing
-    ? Object.entries(currentRoom.typing)
-        .filter(([player, timestamp]) => 
-          player !== playerName && 
-          timestamp > 0 && 
-          Date.now() - timestamp < 3000
-        )
-        .map(([player]) => player)
-    : [];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4 md:p-8">
@@ -478,62 +358,25 @@ function App() {
             <h3 className="text-lg font-semibold mb-2">Players & Scores:</h3>
             <div className="flex gap-2 flex-wrap">
               {currentRoom.players.map((player) => (
-                <div key={player} className="flex items-center gap-2">
-                  <span
-                    className={`px-3 py-1 rounded-full ${
-                      player === currentRoom.currentTurn
-                        ? 'bg-green-100 text-green-800 font-bold'
-                        : player === playerName
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-gray-100 text-gray-800'
-                    }`}
-                  >
-                    {player} {player === playerName && '(You)'} 
-                    {player === currentRoom.currentTurn && '🎲'}
-                    <span className="ml-1 font-bold">
-                      {currentRoom.score?.[player] || 0}pts
-                    </span>
+                <span
+                  key={player}
+                  className={`px-3 py-1 rounded-full ${
+                    player === currentRoom.currentTurn
+                      ? 'bg-green-100 text-green-800 font-bold'
+                      : player === playerName
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}
+                >
+                  {player} {player === playerName && '(You)'} 
+                  {player === currentRoom.currentTurn && '🎲'}
+                  <span className="ml-1 font-bold">
+                    {currentRoom.score?.[player] || 0}pts
                   </span>
-                  {player !== playerName && (
-                    <button
-                      onClick={() => initiateVoteKick(player)}
-                      className="text-red-500 hover:text-red-700"
-                      title={`Vote to remove ${player}`}
-                    >
-                      <UserMinus size={16} />
-                    </button>
-                  )}
-                </div>
+                </span>
               ))}
             </div>
           </div>
-
-          {currentRoom.voteKick && (
-            <div className="mb-6 p-4 bg-red-50 rounded-lg">
-              <h3 className="text-lg font-semibold mb-2">Vote to Remove Player</h3>
-              <p>
-                {currentRoom.voteKick.initiator} has started a vote to remove {currentRoom.voteKick.target}.
-                <br />
-                Votes: {currentRoom.voteKick.votes.length} / {Math.ceil(currentRoom.players.length * 0.7)} required
-              </p>
-              {!currentRoom.voteKick.votes.includes(playerName) && currentRoom.voteKick.target !== playerName && (
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => voteToKick(true)}
-                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-                  >
-                    Vote Yes
-                  </button>
-                  <button
-                    onClick={() => voteToKick(false)}
-                    className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
-                  >
-                    Cancel Vote
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Chat Section */}
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -556,19 +399,11 @@ function App() {
                 ))}
               <div ref={chatEndRef} />
             </div>
-            {typingPlayers.length > 0 && (
-              <div className="text-sm text-gray-500 italic mb-2">
-                {typingPlayers.join(', ')} {typingPlayers.length === 1 ? 'is' : 'are'} typing...
-              </div>
-            )}
             <div className="flex gap-2">
               <input
                 type="text"
                 value={chatMessage}
-                onChange={(e) => {
-                  setChatMessage(e.target.value);
-                  updateTypingStatus(true);
-                }}
+                onChange={(e) => setChatMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
                 className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-purple-500 focus:ring focus:ring-purple-200"
                 placeholder="Type a message..."
