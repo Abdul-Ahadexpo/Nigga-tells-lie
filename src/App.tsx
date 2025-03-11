@@ -148,6 +148,7 @@ function App() {
           score: Object.entries(currentRoom.score || {})
             .filter(([player]) => player !== target)
             .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
+          chat: currentRoom.chat || {}, // Preserve chat
         };
 
         await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -160,6 +161,7 @@ function App() {
             ...currentRoom.voteKick,
             votes: updatedVotes,
           },
+          chat: currentRoom.chat || {}, // Preserve chat
         };
         await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
       }
@@ -168,6 +170,7 @@ function App() {
       const updatedRoom = {
         ...currentRoom,
         voteKick: undefined,
+        chat: currentRoom.chat || {}, // Preserve chat
       };
       await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
       toast.error('Vote to remove player was cancelled');
@@ -213,6 +216,7 @@ function App() {
       ...room,
       players: updatedPlayers,
       score: { ...room.score, [playerName]: 0 },
+      chat: room.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${room.id}`), updatedRoom);
@@ -237,6 +241,7 @@ function App() {
         completed: false,
         reactions: {},
       },
+      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -254,6 +259,7 @@ function App() {
         ...currentRoom.currentChallenge,
         response,
       },
+      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -273,6 +279,7 @@ function App() {
           [playerName]: reaction,
         },
       },
+      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -308,6 +315,7 @@ function App() {
         completed: true,
       },
       score: updatedScore,
+      chat: currentRoom.chat || {}, // Preserve chat
     };
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
@@ -358,8 +366,8 @@ function App() {
         score: Object.entries(currentRoom.score || {})
           .filter(([player]) => player !== playerName)
           .reduce((acc, [player, score]) => ({ ...acc, [player]: score }), {}),
-        chat: currentRoom.chat,
-        typing: currentRoom.typing,
+        chat: currentRoom.chat || {}, // Preserve chat
+        typing: currentRoom.typing || {},
       };
 
       // Only add currentChallenge if it doesn't involve the leaving player
@@ -397,7 +405,7 @@ function App() {
             <Crown className="w-8 h-8 mr-2 text-yellow-500" />
             Truth or Dare
           </h1>
-        <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your nigga friends in this shitty game!</p>
+          <p className="text-lg text-gray-600 flex items-center justify-center text-center">Challenge your friends in this exciting game!</p>
           
           <div className="space-y-4 mt-6 md:mt-8">
             <div>
