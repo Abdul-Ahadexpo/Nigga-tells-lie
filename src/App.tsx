@@ -7,29 +7,8 @@ import { CreateRoomModal } from './components/CreateRoomModal';
 import { JoinRoomModal } from './components/JoinRoomModal';
 import { KickVoteModal } from './components/KickVoteModal';
 import { ThemeToggle } from './components/ThemeToggle';
-
-type Room = {
-  id: string;
-  name: string;
-  players: string[];
-  currentTurn: string;
-  isPrivate: boolean;
-  password?: string;
-  owner: string;
-  kickVotes: {
-    [targetUid: string]: string[]; // Array of UIDs who voted to kick
-  };
-  currentChallenge?: {
-    type: 'truth' | 'dare';
-    question: string;
-    from: string;
-    to: string;
-    completed: boolean;
-    response?: string;
-    reactions?: { [key: string]: string };
-  };
-  score?: { [key: string]: number };
-};
+import { Chat } from './components/Chat';
+import { Room, ChatMessage } from './types';
 
 function App() {
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') || '');
@@ -92,10 +71,11 @@ function App() {
       players: [playerName],
       currentTurn: playerName,
       isPrivate: data.isPrivate,
-      ...(data.isPrivate && { password: data.password }), // Only include password if room is private
+      ...(data.isPrivate ? { password: data.password } : {}),
       owner: playerName,
       kickVotes: {},
       score: { [playerName]: 0 },
+      messages: [],
     };
 
     await set(newRoomRef, newRoom);
@@ -141,7 +121,7 @@ function App() {
   };
 
   const handleKickVote = async (targetPlayer: string) => {
-    if (!currentRoom) return;
+    if (!currentRoom || !playerName) return;
 
     const currentVotes = currentRoom.kickVotes?.[targetPlayer] || [];
     if (currentVotes.includes(playerName)) {
@@ -168,12 +148,14 @@ function App() {
       
       // Update turn if needed
       if (updatedRoom.currentTurn === targetPlayer) {
-        updatedRoom.currentTurn = updatedRoom.players[0];
+        const nextPlayerIndex = currentRoom.players.indexOf(targetPlayer) + 1;
+        updatedRoom.currentTurn = updatedRoom.players[nextPlayerIndex % updatedRoom.players.length];
       }
       
       // Remove from scores
       if (updatedRoom.score) {
-        delete updatedRoom.score[targetPlayer];
+        const { [targetPlayer]: _, ...remainingScores } = updatedRoom.score;
+        updatedRoom.score = remainingScores;
       }
       
       toast.success(`${targetPlayer} has been kicked from the room`);
@@ -183,6 +165,24 @@ function App() {
 
     await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
     setShowKickModal(null);
+  };
+
+  const handleSendMessage = async (message: string) => {
+    if (!currentRoom) return;
+
+    const newMessage: ChatMessage = {
+      id: Date.now().toString(),
+      sender: playerName,
+      message,
+      timestamp: Date.now(),
+    };
+
+    const updatedRoom = {
+      ...currentRoom,
+      messages: [...(currentRoom.messages || []), newMessage],
+    };
+
+    await set(ref(db, `rooms/${currentRoom.id}`), updatedRoom);
   };
 
   const sendChallenge = async (type: 'truth' | 'dare') => {
@@ -401,7 +401,7 @@ function App() {
           </div>
         </div>
       ) : (
-        <div className="max-w-2xl mx-auto p-4 md:p-6">
+        <div className="max-w-6xl mx-auto p-4 md:p-6">
           <div className="bg-card rounded-lg shadow-lg p-6">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 md:gap-0">
               <div>
@@ -464,165 +464,175 @@ function App() {
               </div>
             </div>
 
-            {currentRoom.currentChallenge && (
-              <div className="mb-6 bg-accent rounded-lg p-4">
-                <h3 className="text-lg font-semibold mb-2 text-accent-foreground">Current Challenge:</h3>
-                <div className="space-y-2">
-                  <p className="text-accent-foreground">
-                    <span className="font-medium">From:</span> {currentRoom.currentChallenge.from}
-                  </p>
-                  <p className="text-accent-foreground">
-                    <span className="font-medium">To:</span> {currentRoom.currentChallenge.to}
-                  </p>
-                  <p className="text-accent-foreground">
-                    <span className="font-medium">Type:</span>{' '}
-                    <span className={`capitalize font-bold`}>
-                      {currentRoom.currentChallenge.type}
-                    </span>
-                  </p>
-                  <p className="text-accent-foreground">
-                    <span className="font-medium">Challenge:</span>{' '}
-                    <span className="text-lg">{currentRoom.currentChallenge.question}</span>
-                  </p>
-
-                  {currentRoom.currentChallenge.to === playerName && !currentRoom.currentChallenge.completed && (
-                    <div className="mt-4 bg-card rounded-lg border border-border p-4">
-                      <p className="text-destructive font-semibold mb-2">
-                        ⚠️ It's your turn to respond!
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-6">
+                {currentRoom.currentChallenge && (
+                  <div className="bg-accent rounded-lg p-4">
+                    <h3 className="text-lg font-semibold mb-2 text-accent-foreground">Current Challenge:</h3>
+                    <div className="space-y-2">
+                      <p className="text-accent-foreground">
+                        <span className="font-medium">From:</span> {currentRoom.currentChallenge.from}
                       </p>
-                      <textarea
-                        value={response}
-                        onChange={(e) => setResponse(e.target.value)}
-                        className="w-full rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
-                        placeholder="Type your response..."
-                        rows={2}
-                      />
-                      <button
-                        onClick={submitResponse}
-                        className="mt-2 w-full md:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2 justify-center"
-                      >
-                        <MessageCircle size={20} />
-                        Submit Response
-                      </button>
-                    </div>
-                  )}
-
-                  {currentRoom.currentChallenge.response && (
-                    <div className="mt-4 bg-card rounded-lg border border-border p-4">
-                      <p className="font-medium text-card-foreground">Response:</p>
-                      <p className="text-lg text-card-foreground">
-                        {currentRoom.currentChallenge.response}
+                      <p className="text-accent-foreground">
+                        <span className="font-medium">To:</span> {currentRoom.currentChallenge.to}
                       </p>
-                      
-                      {!currentRoom.currentChallenge.reactions?.[playerName] && (
-                        <div className="mt-2 flex flex-col md:flex-row gap-2">
-                          <input
-                            type="text"
-                            value={reaction}
-                            onChange={(e) => setReaction(e.target.value)}
-                            className="flex-1 rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
-                            placeholder="Add a reaction..."
+                      <p className="text-accent-foreground">
+                        <span className="font-medium">Type:</span>{' '}
+                        <span className={`capitalize font-bold`}>
+                          {currentRoom.currentChallenge.type}
+                        </span>
+                      </p>
+                      <p className="text-accent-foreground">
+                        <span className="font-medium">Challenge:</span>{' '}
+                        <span className="text-lg">{currentRoom.currentChallenge.question}</span>
+                      </p>
+
+                      {currentRoom.currentChallenge.to === playerName && !currentRoom.currentChallenge.completed && (
+                        <div className="mt-4 bg-card rounded-lg border border-border p-4">
+                          <p className="text-destructive font-semibold mb-2">
+                            ⚠️ It's your turn to respond!
+                          </p>
+                          <textarea
+                            value={response}
+                            onChange={(e) => setResponse(e.target.value)}
+                            className="w-full rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
+                            placeholder="Type your response..."
+                            rows={2}
                           />
                           <button
-                            onClick={addReaction}
-                            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                            onClick={submitResponse}
+                            className="mt-2 w-full md:w-auto px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2 justify-center"
                           >
-                            React
+                            <MessageCircle size={20} />
+                            Submit Response
                           </button>
                         </div>
                       )}
 
-                      {currentRoom.currentChallenge.reactions && 
-                       Object.keys(currentRoom.currentChallenge.reactions).length > 0 && (
-                        <div className="mt-2">
-                          <p className="font-medium text-card-foreground">Reactions:</p>
-                          <div className="flex flex-wrap gap-2 mt-1">
-                            {Object.entries(currentRoom.currentChallenge.reactions).map(([player, reaction]) => (
-                              <span key={player} className="px-2 py-1 bg-secondary text-secondary-foreground rounded-full text-sm">
-                                {player}: {reaction}
-                              </span>
-                            ))}
-                          </div>
+                      {currentRoom.currentChallenge.response && (
+                        <div className="mt-4 bg-card rounded-lg border border-border p-4">
+                          <p className="font-medium text-card-foreground">Response:</p>
+                          <p className="text-lg text-card-foreground">
+                            {currentRoom.currentChallenge.response}
+                          </p>
+                          
+                          {!currentRoom.currentChallenge.reactions?.[playerName] && (
+                            <div className="mt-2 flex flex-col md:flex-row gap-2">
+                              <input
+                                type="text"
+                                value={reaction}
+                                onChange={(e) => setReaction(e.target.value)}
+                                className="flex-1 rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
+                                placeholder="Add a reaction..."
+                              />
+                              <button
+                                onClick={addReaction}
+                                className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                              >
+                                React
+                              </button>
+                            </div>
+                          )}
+
+                          {currentRoom.currentChallenge.reactions && 
+                           Object.keys(currentRoom.currentChallenge.reactions).length > 0 && (
+                            <div className="mt-2">
+                              <p className="font-medium text-card-foreground">Reactions:</p>
+                              <div className="flex flex-wrap gap-2 mt-1">
+                                {Object.entries(currentRoom.currentChallenge.reactions).map(([player, reaction]) => (
+                                  <span key={player} className="px-2 py-1 bg-secondary text-secondary-foreground rounded-full text-sm">
+                                    {player}: {reaction}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!currentRoom.currentChallenge.completed && 
+                       currentRoom.currentChallenge.from === playerName && 
+                       currentRoom.currentChallenge.response && (
+                        <div className="mt-4 flex flex-col md:flex-row gap-2">
+                          <button
+                            onClick={() => markChallengeComplete(true)}
+                            className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2 justify-center"
+                          >
+                            <Check size={20} />
+                            Accept Response
+                          </button>
+                          <button
+                            onClick={() => markChallengeComplete(false)}
+                            className="flex-1 px-4 py-2 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 flex items-center gap-2 justify-center"
+                          >
+                            <X size={20} />
+                            Reject Response
+                          </button>
                         </div>
                       )}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {!currentRoom.currentChallenge.completed && 
-                   currentRoom.currentChallenge.from === playerName && 
-                   currentRoom.currentChallenge.response && (
-                    <div className="mt-4 flex flex-col md:flex-row gap-2">
-                      <button
-                        onClick={() => markChallengeComplete(true)}
-                        className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2 justify-center"
+                {currentRoom.currentTurn === playerName && 
+                 (!currentRoom.currentChallenge || currentRoom.currentChallenge.completed) && (
+                  <div className="space-y-4">
+                    <p className="text-primary font-semibold text-lg">
+                      🎲 It's your turn to give a challenge!
+                    </p>
+                    
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-card-foreground mb-1">
+                        Select Player to Challenge:
+                      </label>
+                      <select
+                        value={selectedPlayer}
+                        onChange={(e) => setSelectedPlayer(e.target.value)}
+                        className="w-full rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
                       >
-                        <Check size={20} />
-                        Accept Response
+                        <option value="">Choose a player...</option>
+                        {currentRoom.players
+                          .filter(player => player !== playerName)
+                          .map(player => (
+                            <option key={player} value={player}>{player}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                    
+                    <textarea
+                      value={challenge}
+                      onChange={(e) => setChallenge(e.target.value)}
+                      className="w-full rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
+                      placeholder="Enter your truth question or dare challenge..."
+                      rows={3}
+                    />
+                    <div className="flex flex-col md:flex-row gap-2">
+                      <button
+                        onClick={() => sendChallenge('truth')}
+                        className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center justify-center gap-2"
+                      >
+                        <Play size={20} />
+                        Ask Truth
                       </button>
                       <button
-                        onClick={() => markChallengeComplete(false)}
-                        className="flex-1 px-4 py-2 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 flex items-center gap-2 justify-center"
+                        onClick={() => sendChallenge('dare')}
+                        className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center justify-center gap-2"
                       >
-                        <X size={20} />
-                        Reject Response
+                        <Play size={20} />
+                        Give Dare
                       </button>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-            )}
 
-            {currentRoom.currentTurn === playerName && 
-             (!currentRoom.currentChallenge || currentRoom.currentChallenge.completed) && (
-              <div className="space-y-4">
-                <p className="text-primary font-semibold text-lg">
-                  🎲 It's your turn to give a challenge!
-                </p>
-                
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-card-foreground mb-1">
-                    Select Player to Challenge:
-                  </label>
-                  <select
-                    value={selectedPlayer}
-                    onChange={(e) => setSelectedPlayer(e.target.value)}
-                    className="w-full rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">Choose a player...</option>
-                    {currentRoom.players
-                      .filter(player => player !== playerName)
-                      .map(player => (
-                        <option key={player} value={player}>{player}</option>
-                      ))
-                    }
-                  </select>
-                </div>
-                
-                <textarea
-                  value={challenge}
-                  onChange={(e) => setChallenge(e.target.value)}
-                  className="w-full rounded-md border-input bg-background text-foreground shadow-sm focus:ring-2 focus:ring-ring"
-                  placeholder="Enter your truth question or dare challenge..."
-                  rows={3}
-                />
-                <div className="flex flex-col md:flex-row gap-2">
-                  <button
-                    onClick={() => sendChallenge('truth')}
-                    className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center justify-center gap-2"
-                  >
-                    <Play size={20} />
-                    Ask Truth
-                  </button>
-                  <button
-                    onClick={() => sendChallenge('dare')}
-                    className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center justify-center gap-2"
-                  >
-                    <Play size={20} />
-                    Give Dare
-                  </button>
-                </div>
-              </div>
-            )}
+              <Chat
+                messages={currentRoom.messages || []}
+                onSendMessage={handleSendMessage}
+                className="sticky top-4"
+              />
+            </div>
           </div>
         </div>
       )}

@@ -4,6 +4,13 @@ export type User = {
   username: string;
 };
 
+export type ChatMessage = {
+  id: string;
+  sender: string;
+  message: string;
+  timestamp: number;
+};
+
 export type Room = {
   id: string;
   name: string;
@@ -25,4 +32,5 @@ export type Room = {
     reactions?: { [key: string]: string };
   };
   score?: { [key: string]: number };
+  messages?: ChatMessage[];
 };
